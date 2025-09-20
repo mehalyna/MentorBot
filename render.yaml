@@ -1,0 +1,21 @@
+services:
+  - type: worker
+    name: ss-academy-discord-bot
+    repo: https://github.com/<YOUR_ORG_OR_USER>/<YOUR_REPO>
+    branch: main
+    region: frankfurt
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    startCommand: "npm start"
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DISCORD_TOKEN
+        sync: false
+      - key: MENTOR_ROLE_ID
+        sync: false
+      - key: ON_DUTY_ROLE_ID
+        sync: false
+      - key: SHARE_CHAT_URL
+        sync: false
