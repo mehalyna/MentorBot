@@ -1,3 +1,5 @@
+// Requirements: node >=18, dependencies: discord.js, dotenv, luxon
+
 import 'dotenv/config';
 import { Client, GatewayIntentBits } from 'discord.js';
 import { DateTime } from 'luxon';
@@ -5,7 +7,7 @@ import { DateTime } from 'luxon';
 const {
   DISCORD_TOKEN,
   MENTOR_ROLE_ID,
-  ON_DUTY_ROLE_ID,
+  // ON_DUTY_ROLE_ID,   
   SHARE_CHAT_URL,
   WORK_DAYS = '1,2,3,4,5',
   WORK_START = '9',
@@ -23,10 +25,7 @@ if (!MENTOR_ROLE_ID) {
   console.error('Missing MENTOR_ROLE_ID in env');
   process.exit(1);
 }
-if (!ON_DUTY_ROLE_ID) {
-  console.error('Missing ON_DUTY_ROLE_ID in env');
-  process.exit(1);
-}
+// ON_DUTY_ROLE_ID 
 
 const WORK_DAYS_ARR = WORK_DAYS.split(',').map(s => Number(s.trim()));
 const WORK_START_H = Number(WORK_START);
@@ -42,65 +41,83 @@ const client = new Client({
   ]
 });
 
+// Simple health HTTP endpoint (optional) — useful for deployment
+import http from 'http';
+const HEALTH_PORT = process.env.HEALTH_PORT || 8080;
+http.createServer((req, res) => {
+  if (req.url === '/health') {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('ok');
+  } else {
+    res.writeHead(404);
+    res.end();
+  }
+}).listen(HEALTH_PORT, () => {
+  console.log(`Health server listening on ${HEALTH_PORT}`);
+});
+
 const userCooldown = new Map();
 
 function isInWorkHours(now) {
   return WORK_DAYS_ARR.includes(now.weekday) && now.hour >= WORK_START_H && now.hour < WORK_END_H;
 }
 
-client.once('ready', () => {
+// Compatible ready handler: subscribe to both events to avoid DeprecationWarning
+let readyHandled = false;
+function handleClientReady() {
+  if (readyHandled) return;
+  readyHandled = true;
   console.log(`Bot ready: ${client.user.tag}`);
-});
+// additional initializations if needed
+}
+client.once('ready', handleClientReady);
+client.once('clientReady', handleClientReady); // для майбутніх версій
 
 client.on('messageCreate', async (message) => {
   try {
     if (message.author.bot) return;
 
     // Check if the mentor role is mentioned in the message
-    const mentionsMentor = message.mentions?.roles?.some(r => r.id === MENTOR_ROLE_ID);
+    const mentionsMentor = !!message.mentions?.roles?.some(r => r.id === MENTOR_ROLE_ID);
     if (!mentionsMentor) return;
 
-    // Cooldown for the user to prevent spam
+    // Cooldown for the user
     const last = userCooldown.get(message.author.id) || 0;
     if (Date.now() - last < COOLDOWN) return;
     userCooldown.set(message.author.id, Date.now());
 
-    // Time in Kyiv
     const now = DateTime.now().setZone(KYIV_TZ);
 
-    // If during working hours — do nothing (or optionally send an informative reply)
+    // If during work hours — do nothing
     if (isInWorkHours(now)) {
-        // optional: notify that mentors will respond to the request
-        // await message.reply(`Mentors are already here — your message has been noticed.`);
       return;
     }
 
-    // Outside working hours -> reply in the channel, ping the on-duty role, and add a link to the share-chat
-    const onDutyMention = `<@&${ON_DUTY_ROLE_ID}>`;
-    const timeStr = now.toFormat('cccc, HH:mm'); // приклад: "середа, 21:05"
-
+    // OUTSIDE WORKING HOURS — reply in the channel without pinging the role
+    const timeStr = now.toFormat('cccc, HH:mm');
     const replyText =
-      `${message.author}, зараз поза робочим часом (Kyiv: ${timeStr}). ` +
-      `Я повідомив ${onDutyMention} — вони зможуть допомогти або ви можете одразу скористатись самодопомогою:\n\n` +
-      `🔗 ${SHARE_CHAT_URL ?? '(посилання не налаштоване)'}\n\n` +
-      `Порада: опишіть коротко проблему і вставте фрагмент коду / очікуваний результат — так допомога буде точнішою. 🙂`;
+      `${message.author}, вибачте — зараз поза робочим часом (Kyiv: ${timeStr}) менторів. ` +
+      `Ось швидка самодопомога: ${SHARE_CHAT_URL ?? '(посилання не налаштоване)'}\n\n` +
+      `Порада: опишіть коротко проблему й вставте фрагмент коду або очікуваний результат — ` +
+      `це допоможе отримати швидку і точну відповідь від чату. 😊`;
 
-    // Send a reply in the channel, allowing only this role to be pinged
+    // Send a message to the channel. allowedMentions is empty to avoid accidental pings
     await message.reply({
       content: replyText,
-      allowedMentions: { roles: ON_DUTY_ROLE_ID ? [ON_DUTY_ROLE_ID] : [] }
+      allowedMentions: { parse: [] }
     });
 
-    // Optional fallback: if the role is not mentionable or the ping did not work, send a DM with a gentle suggestion
+    // Fallback: DM the user with the link (if allowed by their settings)
     if (DO_FALLBACK_DM) {
       try {
         await message.author.send(
-          `Ваше запитання помічено. Поза робочим часом — ось миттєва самодопомога: ${SHARE_CHAT_URL}\n\n` +
-          `Якщо хочете — залиште тут питання, і вранці ментори вам дадуть відповідь.`
+          `Привіт! Ваше питання помічено. Тимчасова самодопомога: ${SHARE_CHAT_URL}\n\n` +
+          `Якщо після цього залишаться питання — ментори дадуть відповідь у робочий час.`
         );
+        console.log(`DM sent to ${message.author.tag}`);
       } catch (dmErr) {
-        // DM may be closed in the user's settings — ignore the error
-        console.debug('Could not send DM to user (likely closed DMs).');
+        console.log(`Could not send DM to ${message.author.tag}: ${dmErr?.message ?? dmErr}`);
+        // If the DM was not delivered — the channel message was already sent, which is usually sufficient
       }
     }
 
@@ -108,8 +125,15 @@ client.on('messageCreate', async (message) => {
     console.error('Error processing messageCreate:', err);
     try {
       await message.reply('Сталася помилка при обробці повідомлення. Спробуйте ще раз, будь ласка.');
-    } catch {}
+    } catch (e) {
+      console.error('Also failed to send fallback reply in channel:', e);
+    }
   }
+});
+
+// Useful handling of unhandled Promise rejections
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled Rejection:', reason);
 });
 
 client.login(DISCORD_TOKEN);
