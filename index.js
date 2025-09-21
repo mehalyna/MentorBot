@@ -89,7 +89,7 @@ function handleClientReady() {
   console.log(`Bot ready: ${client.user.tag}`);
 // additional initializations if needed
 }
-client.once('ready', handleClientReady);
+// client.once('ready', handleClientReady);
 client.once('clientReady', handleClientReady); // for future versions
 
 client.on('messageCreate', async (message) => {
