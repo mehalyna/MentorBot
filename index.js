@@ -33,6 +33,25 @@ const WORK_END_H = Number(WORK_END);
 const COOLDOWN = Number(COOLDOWN_MS);
 const DO_FALLBACK_DM = FALLBACK_DM.toLowerCase() === 'true';
 
+// Filtered warning handler: specifically ignore this DeprecationWarning about ready -> clientReady
+process.on('warning', (warning) => {
+  try {
+    if (
+      warning.name === 'DeprecationWarning' &&
+      /ready event has been renamed to clientReady/i.test(String(warning.message))
+    ) {
+      // ignore this specific warning
+      return;
+    }
+  } catch (e) {
+    // if something went wrong while filtering — just log the warning
+    console.warn(warning);
+  }
+  // For all other warnings — show as usual
+  console.warn(warning);
+});
+
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -71,7 +90,7 @@ function handleClientReady() {
 // additional initializations if needed
 }
 client.once('ready', handleClientReady);
-client.once('clientReady', handleClientReady); // для майбутніх версій
+client.once('clientReady', handleClientReady); // for future versions
 
 client.on('messageCreate', async (message) => {
   try {
@@ -96,7 +115,7 @@ client.on('messageCreate', async (message) => {
     // OUTSIDE WORKING HOURS — reply in the channel without pinging the role
     const timeStr = now.toFormat('cccc, HH:mm');
     const replyText =
-      `${message.author}, вибачте — зараз поза робочим часом (Kyiv: ${timeStr}) менторів. ` +
+      `${message.author}, вибачте — зараз поза робочим часом менторів (Kyiv: ${timeStr}). ` +
       `Ось швидка самодопомога: ${SHARE_CHAT_URL ?? '(посилання не налаштоване)'}\n\n` +
       `Порада: опишіть коротко проблему й вставте фрагмент коду або очікуваний результат — ` +
       `це допоможе отримати швидку і точну відповідь від чату. 😊`;
